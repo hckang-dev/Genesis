@@ -3,15 +3,14 @@ import os
 import pickle
 import shutil
 
+import torch
+import numpy as np
 from go2_env import Go2Env
 from rsl_rl.runners import OnPolicyRunner
-
 import genesis as gs
-import torch
 
 def get_train_cfg(exp_name, max_iterations):
-
-    train_cfg_dict = {
+    return {
         "algorithm": {
             "clip_param": 0.2,
             "desired_kl": 0.01,
@@ -26,7 +25,6 @@ def get_train_cfg(exp_name, max_iterations):
             "use_clipped_value_loss": True,
             "value_loss_coef": 1.0,
         },
-        "init_member_classes": {},
         "policy": {
             "activation": "elu",
             "actor_hidden_dims": [512, 256, 128],
@@ -37,24 +35,12 @@ def get_train_cfg(exp_name, max_iterations):
             "algorithm_class_name": "PPO",
             "checkpoint": -1,
             "experiment_name": exp_name,
-            "load_run": -1,
-            "log_interval": 1,
             "max_iterations": max_iterations,
             "num_steps_per_env": 24,
-            "policy_class_name": "ActorCritic",
-            "record_interval": -1,
-            "resume": False,
-            "resume_path": None,
-            "run_name": "",
-            "runner_class_name": "runner_class_name",
             "save_interval": 100,
         },
-        "runner_class_name": "OnPolicyRunner",
         "seed": 1,
     }
-
-    return train_cfg_dict
-
 
 def get_cfgs():
     env_cfg = {
@@ -92,8 +78,9 @@ def get_cfgs():
         "kp": 20.0,
         "kd": 0.5,
         # termination
-        "termination_if_roll_greater_than": 10,  # degree
-        "termination_if_pitch_greater_than": 10,
+            "termination_if_no_progress": 1.0,  # 일정 시간 동안 전진 속도가 낮으면 종료 (m/s)
+            "termination_if_no_contact": 0.1,  # 다리가 지면에서 떨어진 시간 (초)
+            "termination_if_collision": True,  # 환경과 충돌하면 종료
         # base pose
         "base_init_pos": [0.0, 0.0, 0.42],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
@@ -113,59 +100,48 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "tracking_sigma": 0.25,
-        "base_height_target": 0.3,
-        "feet_height_target": 0.075,
         "reward_scales": {
-            "tracking_lin_vel": 1.0,
-            "tracking_ang_vel": 0.2,
-            "lin_vel_z": -1.0,
-            "base_height": -50.0,
-            "action_rate": -0.005,
-            "similar_to_default": -0.1,
+            "path_tracking": 1.0,
+            "action_smoothness": -0.005,
         },
     }
-    command_cfg = {
-        "num_commands": 3,
-        "lin_vel_x_range": [0.5, 0.5],
-        "lin_vel_y_range": [0, 0],
-        "ang_vel_range": [0, 0],
+    path_cfg = {
+        "waypoints": np.array([
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+        ]),
+        "tolerance": 0.1,
     }
+    return env_cfg, obs_cfg, reward_cfg, path_cfg
 
-    return env_cfg, obs_cfg, reward_cfg, command_cfg
-class WalkingEnv(Go2Env):
+class PathTrackingEnv(Go2Env):
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, path_cfg, device="mps"):
         super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, {}, device=device)
-    # ------------ reward functions----------------
-    def _reward_tracking_lin_vel(self):
-        # Tracking of linear velocity commands (xy axes)
-        lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
-        return torch.exp(-lin_vel_error / self.reward_cfg["tracking_sigma"])
-    
-    def _reward_tracking_ang_vel(self):
-        # Tracking of angular velocity commands (yaw)
-        ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
-        return torch.exp(-ang_vel_error / self.reward_cfg["tracking_sigma"])
+        self.waypoints = torch.tensor(path_cfg["waypoints"], device=self.device)
+        self.tolerance = path_cfg["tolerance"]
+        self.current_waypoint_idx = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
-    def _reward_lin_vel_z(self):
-        # Penalize z axis base linear velocity
-        return torch.square(self.base_lin_vel[:, 2])
+    def step(self, actions):
+        obs, _, rew, reset, extras = super().step(actions)
+        self._update_waypoints()
+        return obs, None, self._compute_path_reward(), reset, extras
 
-    def _reward_action_rate(self):
-        # Penalize changes in actions
-        return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+    def _update_waypoints(self):
+        distances = torch.norm(self.base_pos[:, :2] - self.waypoints[self.current_waypoint_idx], dim=1)
+        waypoint_reached = distances < self.tolerance
+        self.current_waypoint_idx += waypoint_reached.long()
+        self.current_waypoint_idx.clamp_(max=len(self.waypoints) - 1)
 
-    def _reward_similar_to_default(self):
-        # Penalize joint poses far away from default pose
-        return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1)
+    def _compute_path_reward(self):
+        distances = torch.norm(self.base_pos[:, :2] - self.waypoints[self.current_waypoint_idx], dim=1)
+        path_tracking_reward = torch.exp(-distances)
+        return path_tracking_reward * self.reward_cfg["reward_scales"]["path_tracking"]
 
-    def _reward_base_height(self):
-        # Penalize base height away from target
-        return torch.square(self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
-    
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
+    parser.add_argument("-e", "--exp_name", type=str, default="path_tracking")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
@@ -173,31 +149,25 @@ def main():
     gs.init(logging_level="warning")
 
     log_dir = f"logs/{args.exp_name}"
-    env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
+    env_cfg, obs_cfg, reward_cfg, path_cfg = get_cfgs()
     train_cfg = get_train_cfg(args.exp_name, args.max_iterations)
 
     if os.path.exists(log_dir):
         shutil.rmtree(log_dir)
     os.makedirs(log_dir, exist_ok=True)
 
-    env = WalkingEnv(
-        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg
+    env = PathTrackingEnv(
+        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, path_cfg=path_cfg
     )
 
     runner = OnPolicyRunner(env, train_cfg, log_dir, device="mps:0")
 
     pickle.dump(
-        [env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg],
+        [env_cfg, obs_cfg, reward_cfg, path_cfg, train_cfg],
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
     runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
 
-
 if __name__ == "__main__":
     main()
-
-"""
-# training
-python examples/locomotion/go2_train.py
-"""

@@ -3,7 +3,7 @@ import os
 import pickle
 import shutil
 
-from go2_env import Go2Env
+from go2_wt_env import Go2WalkingTargetEnv
 from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
@@ -92,16 +92,23 @@ def get_cfgs():
         "kp": 20.0,
         "kd": 0.5,
         # termination
-        "termination_if_roll_greater_than": 10,  # degree
-        "termination_if_pitch_greater_than": 10,
+        "termination_if_roll_greater_than": 45,  # degree
+        "termination_if_pitch_greater_than": 45,
+        "termination_if_x_greater_than": 3.0,
+        "termination_if_y_greater_than": 3.0,
         # base pose
         "base_init_pos": [0.0, 0.0, 0.42],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 20.0,
-        "resampling_time_s": 4.0,
+        "at_target_threshold": 0.1,
+        "resampling_time_s": 10.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
+        # visualization
+        "visualize_target": True,
+        "visualize_camera": False,
+        "max_visualize_FPS": 60,
     }
     obs_cfg = {
         "num_obs": 45,
@@ -110,6 +117,7 @@ def get_cfgs():
             "ang_vel": 0.25,
             "dof_pos": 1.0,
             "dof_vel": 0.05,
+            "rel_pos": 2.0
         },
     }
     reward_cfg = {
@@ -117,55 +125,26 @@ def get_cfgs():
         "base_height_target": 0.3,
         "feet_height_target": 0.075,
         "reward_scales": {
+            "target": 10.0,
             "tracking_lin_vel": 1.0,
-            "tracking_ang_vel": 0.2,
-            "lin_vel_z": -1.0,
-            "base_height": -50.0,
             "action_rate": -0.005,
             "similar_to_default": -0.1,
+            "base_height": -50.0,            
         },
     }
     command_cfg = {
         "num_commands": 3,
-        "lin_vel_x_range": [0.5, 0.5],
-        "lin_vel_y_range": [0, 0],
-        "ang_vel_range": [0, 0],
+        "pos_x_range": [-0.5, 0.5],
+        "pos_y_range": [-0.5, 0.5],
+        "pos_z_range": [0.42, 0.42],
     }
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg
-class WalkingEnv(Go2Env):
-    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, path_cfg, device="mps"):
-        super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, {}, device=device)
-    # ------------ reward functions----------------
-    def _reward_tracking_lin_vel(self):
-        # Tracking of linear velocity commands (xy axes)
-        lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
-        return torch.exp(-lin_vel_error / self.reward_cfg["tracking_sigma"])
-    
-    def _reward_tracking_ang_vel(self):
-        # Tracking of angular velocity commands (yaw)
-        ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
-        return torch.exp(-ang_vel_error / self.reward_cfg["tracking_sigma"])
 
-    def _reward_lin_vel_z(self):
-        # Penalize z axis base linear velocity
-        return torch.square(self.base_lin_vel[:, 2])
-
-    def _reward_action_rate(self):
-        # Penalize changes in actions
-        return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
-
-    def _reward_similar_to_default(self):
-        # Penalize joint poses far away from default pose
-        return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1)
-
-    def _reward_base_height(self):
-        # Penalize base height away from target
-        return torch.square(self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
     
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
+    parser.add_argument("-e", "--exp_name", type=str, default="go2-wt")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
@@ -180,8 +159,8 @@ def main():
         shutil.rmtree(log_dir)
     os.makedirs(log_dir, exist_ok=True)
 
-    env = WalkingEnv(
-        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg
+    env = Go2WalkingTargetEnv(
+        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, show_viewer=True
     )
 
     runner = OnPolicyRunner(env, train_cfg, log_dir, device="mps:0")
@@ -191,7 +170,10 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    def learn():
+        runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    gs.tools.run_in_another_thread(fn=learn, args=[])
+    # env.scene.viewer.start()
 
 
 if __name__ == "__main__":
@@ -199,5 +181,5 @@ if __name__ == "__main__":
 
 """
 # training
-python examples/locomotion/go2_train.py
+python examples/locomotion/go2_train_walking.py
 """

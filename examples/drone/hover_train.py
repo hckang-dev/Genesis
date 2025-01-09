@@ -124,17 +124,21 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     env = HoverEnv(
-        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg
+        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, show_viewer=True
     )
 
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device="cuda:0")
+    runner = OnPolicyRunner(env, train_cfg, log_dir, device="mps")
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg],
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    
+    def learn():
+        runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    gs.tools.run_in_another_thread(fn=learn, args=[])
+    # env.scene.viewer.start()
 
 
 if __name__ == "__main__":

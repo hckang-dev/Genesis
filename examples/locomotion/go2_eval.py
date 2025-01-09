@@ -20,7 +20,12 @@ def main():
     log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"logs/{args.exp_name}/cfgs.pkl", "rb"))
     reward_cfg["reward_scales"] = {}
-
+    command_cfg = {
+        "num_commands": 3,
+        "lin_vel_x_range": [0.5, 0.5],
+        "lin_vel_y_range": [0.5, 0.5],
+        "ang_vel_range": [-1.0, 1.0],
+    }
     env = Go2Env(
         num_envs=1,
         env_cfg=env_cfg,
@@ -38,6 +43,7 @@ def main():
         with torch.no_grad():
             while True:
                 actions = policy(obs)
+                print(actions)
                 obs, _, rews, dones, infos = env.step(actions)
     obs, _ = env.reset()
     gs.tools.run_in_another_thread(fn=action, args=[obs])

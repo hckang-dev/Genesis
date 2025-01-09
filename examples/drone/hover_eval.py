@@ -38,27 +38,30 @@ def main():
         show_viewer=True,
     )
 
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device="cuda:0")
+    runner = OnPolicyRunner(env, train_cfg, log_dir, device="mps:0")
     resume_path = os.path.join(log_dir, f"model_{args.ckpt}.pt")
     runner.load(resume_path)
-    policy = runner.get_inference_policy(device="cuda:0")
+    policy = runner.get_inference_policy(device="mps:0")
 
-    obs, _ = env.reset()
+    
 
     max_sim_step = int(env_cfg["episode_length_s"] * env_cfg["max_visualize_FPS"])
-    with torch.no_grad():
-        if args.record:
-            env.cam.start_recording()
-            for _ in range(max_sim_step):
-                actions = policy(obs)
-                obs, _, rews, dones, infos = env.step(actions)
-                env.cam.render()
-            env.cam.stop_recording(save_to_filename="video.mp4", fps=env_cfg["max_visualize_FPS"])
-        else:
-            for _ in range(max_sim_step):
-                actions = policy(obs)
-                obs, _, rews, dones, infos = env.step(actions)
-
+    def action(obs):
+        with torch.no_grad():
+            if args.record:
+                env.cam.start_recording()
+                for _ in range(max_sim_step):
+                    actions = policy(obs)
+                    obs, _, rews, dones, infos = env.step(actions)
+                    env.cam.render()
+                env.cam.stop_recording(save_to_filename="video.mp4", fps=env_cfg["max_visualize_FPS"])
+            else:
+                for _ in range(max_sim_step):
+                    actions = policy(obs)
+                    obs, _, rews, dones, infos = env.step(actions)
+    obs, _ = env.reset()
+    gs.tools.run_in_another_thread(fn=action, args=[obs])
+    env.scene.viewer.start()
 
 if __name__ == "__main__":
     main()
