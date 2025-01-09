@@ -259,8 +259,14 @@ class Go2WalkingTargetEnv:
         return self.obs_buf, None
     
     def _reward_target(self):
-        target_rew = torch.sum(torch.square(self.last_rel_pos), dim=1) - torch.sum(torch.square(self.rel_pos), dim=1)
-        return target_rew
+        # 기본적으로 목표에 가까워질수록 보상을 줌
+        distance_reward = -torch.norm(self.rel_pos[:, :2], dim=1)
+        
+        # 목표에 빨리 도달할수록 보상 증가 (에피소드 길이에 반비례)
+        time_bonus = 1.0 / (1.0 + self.episode_length_buf / self.max_episode_length)
+        
+        # 최종 보상 계산
+        return distance_reward * time_bonus
     
     def _reward_tracking_lin_vel(self):
         # Tracking of linear velocity commands (xy axes)

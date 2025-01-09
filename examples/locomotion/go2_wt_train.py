@@ -173,7 +173,7 @@ def main():
     def learn():
         runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
     gs.tools.run_in_another_thread(fn=learn, args=[])
-    # env.scene.viewer.start()
+    env.scene.viewer.start()
 
 
 if __name__ == "__main__":
