@@ -8,7 +8,7 @@ from go2_env import Go2Env
 import genesis as gs
 
 
-def get_cfgs():
+def get_cfgs(): 
     env_cfg = {
         "num_actions": 12,
         # joint/link names
@@ -111,7 +111,7 @@ def main():
     parser.add_argument("-e", "--exp_name", type=str, default="single")
     args = parser.parse_args()
 
-    gs.init()
+    gs.init(backend=gs.metal)
 
     env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
 
@@ -120,7 +120,8 @@ def main():
     elif args.exp_name == "double":
         env_cfg["episode_length_s"] = 3
     else:
-        raise RuntimeError
+        pass
+        # raise RuntimeError
 
     env = BackflipEnv(
         num_envs=1,
@@ -132,13 +133,16 @@ def main():
     )
 
     policy = torch.jit.load(f"./backflip/{args.exp_name}.pt")
-    policy.to(device="cuda:0")
+    policy.to(device="mps")
 
     obs, _ = env.reset()
-    with torch.no_grad():
-        while True:
-            actions = policy(obs)
-            obs, _, rews, dones, infos = env.step(actions)
+    def action(obs):
+        with torch.no_grad():
+            while True:
+                actions = policy(obs)
+                obs, _, rews, dones, infos = env.step(actions)
+    gs.tools.run_in_another_thread(fn=action, args=[obs])
+    env.scene.viewer.start()
 
 
 if __name__ == "__main__":

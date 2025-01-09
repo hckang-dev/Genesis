@@ -117,13 +117,11 @@ def get_cfgs():
         "base_height_target": 0.3,
         "feet_height_target": 0.075,
         "reward_scales": {
-            "action_rate": -0.005,
-            "similar_to_default": -0.1,
-            "max_speed": 1.0,
-            "step_stability": 0.1,
-            "acceleration": 0.1,
-            "recovery": 0.1,
-            "balance": 0.1,
+            "tracking_ang_vel": 1.0,  
+            "action_rate": -0.005,  # 행동 변화 패널티 
+            "similar_to_default": -0.1,  # 기본 자세와 차이 패널티
+            "speed": 1.5,  # 최대 속도 보상 (가중치 ↑↑)
+            "stability": 0.3,  # 안정성 보상 (가중치 ↓)
         },
     }
     command_cfg = {
