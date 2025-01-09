@@ -133,9 +133,20 @@ class Go2WalkingTargetEnv:
         self.extras = dict()  # extra information for logging
 
     def _resample_commands(self, envs_idx):
-        self.commands[envs_idx, 0] = gs_rand_float(*self.command_cfg["pos_x_range"], (len(envs_idx),), self.device)
-        self.commands[envs_idx, 1] = gs_rand_float(*self.command_cfg["pos_y_range"], (len(envs_idx),), self.device)
-        self.commands[envs_idx, 2] = self.env_cfg["base_init_pos"][2]  # maintain z position
+        # 로봇의 현재 위치
+        current_pos = self.base_pos[envs_idx]
+
+        # 무작위 방향 (2D)
+        theta = torch.rand(len(envs_idx), device=self.device) * 2 * math.pi
+
+        new_x = current_pos[:, 0] + torch.cos(theta) * 0.5
+        new_y = current_pos[:, 1] + torch.sin(theta) * 0.5
+        new_z = 0.25
+
+        # 새로운 타겟 위치를 설정
+        self.commands[envs_idx, 0] = new_x
+        self.commands[envs_idx, 1] = new_y
+        self.commands[envs_idx, 2] = new_z
         if self.target is not None:
             self.target.set_pos(self.commands[envs_idx], zero_velocity=True, envs_idx=envs_idx)
     def step(self, actions):

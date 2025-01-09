@@ -101,7 +101,7 @@ def get_cfgs():
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 20.0,
         "at_target_threshold": 0.1,
-        "resampling_time_s": 10.0,
+        "resampling_time_s": 4.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
@@ -149,7 +149,7 @@ def main():
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
 
-    gs.init(logging_level="warning")
+    gs.init(logging_level="error")
 
     log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
