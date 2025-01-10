@@ -100,8 +100,8 @@ def get_cfgs():
         "termination_if_roll_greater_than": 60,  # degree
         "termination_if_pitch_greater_than": 60,
         "termination_if_base_height_less_than": 0.1,
-        "termination_if_x_greater_than": 2.0,
-        "termination_if_y_greater_than": 2.0,
+        "termination_if_x_greater_than": 1.0,
+        "termination_if_y_greater_than": 1.0,
         # base pose
         "base_init_pos": [0.0, 0.0, 0.42],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
