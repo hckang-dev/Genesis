@@ -107,7 +107,7 @@ def get_cfgs():
         "num_obs": 45,
         "obs_scales": {
             "lin_vel": 2.0,
-            "ang_vel": 0.25,
+            "ang_vel": 2.0,
             "dof_pos": 1.0,
             "dof_vel": 0.05,
         },
@@ -118,7 +118,7 @@ def get_cfgs():
         "feet_height_target": 0.075,
         "reward_scales": {
             "tracking_lin_vel": 1.0,
-            "tracking_ang_vel": 0.2,
+            "tracking_ang_vel": 1.0,
             "lin_vel_z": -1.0,
             "base_height": -50.0,
             "action_rate": -0.005,
@@ -127,15 +127,15 @@ def get_cfgs():
     }
     command_cfg = {
         "num_commands": 3,
-        "lin_vel_x_range": [0.5, 0.5],
-        "lin_vel_y_range": [0, 0],
-        "ang_vel_range": [0, 0],
+        "lin_vel_x_range": [-5.0, 5.0],
+        "lin_vel_y_range": [-5.0, 5.0],
+        "ang_vel_range": [-5.0, 5.0],
     }
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg
 class WalkingEnv(Go2Env):
-    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, path_cfg, device="mps"):
-        super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, {}, device=device)
+    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False, device="mps"):
+        super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer, device=device)
     # ------------ reward functions----------------
     def _reward_tracking_lin_vel(self):
         # Tracking of linear velocity commands (xy axes)
@@ -165,7 +165,7 @@ class WalkingEnv(Go2Env):
     
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
+    parser.add_argument("-e", "--exp_name", type=str, default="go2-joystick2")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
@@ -181,7 +181,7 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     env = WalkingEnv(
-        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg
+        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, show_viewer=True
     )
 
     runner = OnPolicyRunner(env, train_cfg, log_dir, device="mps:0")
@@ -191,7 +191,11 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    def learn():
+        runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    gs.tools.run_in_another_thread(fn=learn, args=[])
+    env.scene.viewer.start()
+
 
 
 if __name__ == "__main__":

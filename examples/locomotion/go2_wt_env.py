@@ -2,6 +2,7 @@ import torch
 import math
 import genesis as gs
 from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
+import numpy as np
 
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
@@ -54,22 +55,22 @@ class Go2WalkingTargetEnv:
             gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True
             )
         )
-        # add target
-        if self.env_cfg["visualize_target"]:
-            self.target = self.scene.add_entity(
-                morph=gs.morphs.Box(
-                    size=(0.05, 0.05, 0.05),
-                    fixed=True,
-                    collision=False,
-                ),
-                surface=gs.surfaces.Rough(
-                    diffuse_texture=gs.textures.ColorTexture(
-                        color=(1.0, 0.5, 0.5),
-                    ),
-                ),
-            )
-        else:
-            self.target = None
+        # # add target
+        # if self.env_cfg["visualize_target"]:
+        #     self.target = self.scene.add_entity(
+        #         morph=gs.morphs.Box(
+        #             size=(0.05, 0.05, 0.05),
+        #             fixed=True,
+        #             collision=False,
+        #         ),
+        #         surface=gs.surfaces.Rough(
+        #             diffuse_texture=gs.textures.ColorTexture(
+        #                 color=(1.0, 0.5, 0.5),
+        #             ),
+        #         ),
+        #     )
+        # else:
+        #     self.target = None
         self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=self.device)
         self.base_init_quat = torch.tensor(self.env_cfg["base_init_quat"], device=self.device)
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
@@ -111,11 +112,7 @@ class Go2WalkingTargetEnv:
         self.reset_buf = torch.ones((self.num_envs,), device=self.device, dtype=gs.tc_int)
         self.episode_length_buf = torch.zeros((self.num_envs,), device=self.device, dtype=gs.tc_int)
         self.commands = torch.zeros((self.num_envs, self.num_commands), device=self.device, dtype=gs.tc_float)
-        self.commands_scale = torch.tensor(
-            [self.obs_scales["lin_vel"], self.obs_scales["lin_vel"], self.obs_scales["ang_vel"]],
-            device=self.device,
-            dtype=gs.tc_float,
-        )
+        
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device, dtype=gs.tc_float)
         self.last_actions = torch.zeros_like(self.actions)
         self.dof_pos = torch.zeros_like(self.actions)
@@ -133,22 +130,8 @@ class Go2WalkingTargetEnv:
         self.extras = dict()  # extra information for logging
 
     def _resample_commands(self, envs_idx):
-        # 로봇의 현재 위치
-        current_pos = self.base_pos[envs_idx]
-
-        # 무작위 방향 (2D)
-        theta = torch.rand(len(envs_idx), device=self.device) * 2 * math.pi
-
-        new_x = current_pos[:, 0] + torch.cos(theta) * 0.5
-        new_y = current_pos[:, 1] + torch.sin(theta) * 0.5
-        new_z = 0.25
-
-        # 새로운 타겟 위치를 설정
-        self.commands[envs_idx, 0] = new_x
-        self.commands[envs_idx, 1] = new_y
-        self.commands[envs_idx, 2] = new_z
-        if self.target is not None:
-            self.target.set_pos(self.commands[envs_idx], zero_velocity=True, envs_idx=envs_idx)
+        pass
+        
     def step(self, actions):
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
@@ -201,18 +184,15 @@ class Go2WalkingTargetEnv:
         # compute observations
         self.obs_buf = torch.cat(
             [
-                self.base_ang_vel * self.obs_scales["ang_vel"],  # 3
-                self.projected_gravity,  # 3
-                self.commands * self.commands_scale,  # 3
                 (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
-                self.dof_vel * self.obs_scales["dof_vel"],  # 12
+                self.base_ang_vel * self.obs_scales["ang_vel"],  # 3
                 self.actions,  # 12
+                
             ],
             axis=-1,
         )
 
         self.last_actions[:] = self.actions[:]
-        self.last_dof_vel[:] = self.dof_vel[:]
 
         return self.obs_buf, None, self.rew_buf, self.reset_buf, self.extras
 
@@ -269,20 +249,105 @@ class Go2WalkingTargetEnv:
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
         return self.obs_buf, None
     
-    def _reward_target(self):
-        # 기본적으로 목표에 가까워질수록 보상을 줌
-        distance_reward = -torch.norm(self.rel_pos[:, :2], dim=1)
-        
-        # 목표에 빨리 도달할수록 보상 증가 (에피소드 길이에 반비례)
-        time_bonus = 1.0 / (1.0 + self.episode_length_buf / self.max_episode_length)
-        
-        # 최종 보상 계산
-        return distance_reward * time_bonus
+    def get_robot_pose(self):
+        """
+        Returns the robot's current position and orientation (quaternion).
+        """
+        position = self.robot.get_pos()  # [num_envs, 3]
+        orientation = self.robot.get_quat()  # [num_envs, 4]
+        return position, orientation
+
+    def get_robot_velocity(self):
+        """
+        Returns the robot's linear and angular velocities in the local frame.
+        """
+        linear_velocity = self.robot.get_vel()
+        angular_velocity = self.robot.get_ang()
+        return linear_velocity, angular_velocity
+
+    def get_robot_direction(self):
+        """
+        Computes and returns the robot's forward (face_dir), lateral (side_dir), and upward (up_dir) direction vectors.
+        """
+        _, orientation = self.get_robot_pose()
+
+        # Forward direction (x-axis)
+        face_dir = transform_by_quat(torch.tensor([1.0, 0.0, 0.0], device=self.device), orientation)
+
+        # Lateral direction (y-axis)
+        side_dir = transform_by_quat(torch.tensor([0.0, 1.0, 0.0], device=self.device), orientation)
+
+        # Upward direction (z-axis)
+        up_dir = transform_by_quat(torch.tensor([0.0, 0.0, 1.0], device=self.device), orientation)
+
+        return face_dir, side_dir, up_dir
+    def get_target_direction(self):
+        """
+        Computes and returns the normalized direction vector from the robot's position to the target.
+        """
+        # 현재 로봇 위치와 목표 위치
+        current_pos = self.base_pos  # [num_envs, 3]
+        target_pos = self.commands  # [num_envs, 3]
+
+        # 방향 벡터 계산
+        direction_vector = target_pos - current_pos  # [num_envs, 3]
+
+        # 방향 벡터를 단위 벡터로 정규화
+        direction_norm = torch.norm(direction_vector[:, :2], dim=1, keepdim=True) + 1e-6  # Avoid division by zero
+        normalized_direction = direction_vector[:, :2] / direction_norm  # Only x, y components are normalized
+
+        return normalized_direction  # [num_envs, 2]
+    def get_energy_reward(self):
+        joint_velocities = self.robot.get_dofs_velocity(self.motor_dofs)
+        energy_consumption = torch.sum(torch.abs(self.actions) * torch.abs(joint_velocities), dim=1)
+        return -energy_consumption
     
-    def _reward_tracking_lin_vel(self):
-        # Tracking of linear velocity commands (xy axes)
-        lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
-        return torch.exp(-lin_vel_error / self.reward_cfg["tracking_sigma"])
+    def _reward_goal(self):
+        """
+        Computes the reward for the robot based on its alignment with the target direction,
+        maintaining stability, and minimizing energy consumption.
+        """
+        # Get robot state information
+        COM_pos, COM_quat = self.get_robot_pose()
+        COM_vel, COM_ang = self.get_robot_velocity()
+        face_dir, side_dir, up_dir = self.get_robot_direction()
+
+        # Compute the normalized target direction
+        target_direction = self.get_target_direction()  # [num_envs, 2]
+
+        # Current face direction (x-axis of the robot) projected onto the ground plane
+        face_direction_ground = face_dir[:, :2]  # [num_envs, 2]
+        face_direction_norm = torch.norm(face_direction_ground, dim=1, keepdim=True) + 1e-6  # Avoid division by zero
+        normalized_face_direction = face_direction_ground / face_direction_norm  # Normalize to unit vector
+
+        # Reward for aligning the robot's face direction with the target direction
+        alignment_reward = torch.sum(normalized_face_direction * target_direction, dim=1)  # Dot product measures alignment
+
+        # Reward for maintaining height
+        target_height = self.base_init_pos[2]  # Maintain the initial height
+        height_reward = -torch.abs(COM_pos[:, 2] - target_height)  # Penalize deviations from initial height
+
+        # Reward for stability (staying upright)
+        target_up = torch.tensor([0, 0, 1], device=self.device, dtype=gs.tc_float)  # Target upright direction
+        stability_reward = -torch.norm(up_dir - target_up, dim=1)  # Penalize deviation from upright orientation
+
+        # Reward for minimizing angular velocity
+        ang_velocity_penalty = -torch.norm(COM_ang, dim=1)  # Penalize excessive angular velocity
+
+        # Total reward
+        alpha_align = 2.0
+        alpha_height = 1.0
+        alpha_stability = 1.0
+        alpha_ang = 0.5
+
+        r = (alpha_align * alignment_reward +
+            alpha_height * height_reward +
+            alpha_stability * stability_reward +
+            alpha_ang * ang_velocity_penalty)
+
+        # Add energy penalty
+        r_energy = self.get_energy_reward()
+        return r + r_energy
     
     def _reward_action_rate(self):
         # Penalize changes in actions
@@ -291,8 +356,17 @@ class Go2WalkingTargetEnv:
     def _reward_similar_to_default(self):
         # Penalize joint poses far away from default pose
         return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1)
-
+    
     def _reward_base_height(self):
         # Penalize base height away from target
         return torch.square(self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
-   
+    def _reward_rotation(self):
+        # Convert angular velocity to degrees per second
+        base_ang_vel_deg = self.base_ang_vel * (180 / math.pi)
+        desired_angular_velocity_deg = torch.tensor(
+            [0.0, 0.0, self.command_cfg["target_yaw_rate"] * (180 / math.pi)],
+            device=self.device,
+        )
+        ang_vel_error = torch.norm(base_ang_vel_deg - desired_angular_velocity_deg, dim=1)
+        return -ang_vel_error
+

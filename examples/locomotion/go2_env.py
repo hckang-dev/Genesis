@@ -54,22 +54,6 @@ class Go2Env:
             gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True
             )
         )
-        # add target
-        if self.env_cfg["visualize_target"]:
-            self.target = self.scene.add_entity(
-                morph=gs.morphs.Box(
-                    size=(0.05, 0.05, 0.05),
-                    fixed=True,
-                    collision=False,
-                ),
-                surface=gs.surfaces.Rough(
-                    diffuse_texture=gs.textures.ColorTexture(
-                        color=(1.0, 0.5, 0.5),
-                    ),
-                ),
-            )
-        else:
-            self.target = None
         self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=self.device)
         self.base_init_quat = torch.tensor(self.env_cfg["base_init_quat"], device=self.device)
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
@@ -134,8 +118,6 @@ class Go2Env:
         self.commands[envs_idx, 0] = gs_rand_float(*self.command_cfg["lin_vel_x_range"], (len(envs_idx),), self.device)
         self.commands[envs_idx, 1] = gs_rand_float(*self.command_cfg["lin_vel_y_range"], (len(envs_idx),), self.device)
         self.commands[envs_idx, 2] = gs_rand_float(*self.command_cfg["ang_vel_range"], (len(envs_idx),), self.device)
-        if self.target is not None:
-            self.target.set_pos(self.commands[envs_idx], zero_velocity=True, envs_idx=envs_idx)
     def step(self, actions):
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
@@ -166,8 +148,6 @@ class Go2Env:
 
         # check termination and reset
         self.reset_buf = self.episode_length_buf > self.max_episode_length
-        self.reset_buf |= torch.abs(self.base_euler[:, 1]) > self.env_cfg["termination_if_pitch_greater_than"]
-        self.reset_buf |= torch.abs(self.base_euler[:, 0]) > self.env_cfg["termination_if_roll_greater_than"]
 
         time_out_idx = (self.episode_length_buf > self.max_episode_length).nonzero(as_tuple=False).flatten()
         self.extras["time_outs"] = torch.zeros_like(self.reset_buf, device=self.device, dtype=gs.tc_float)

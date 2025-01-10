@@ -92,15 +92,14 @@ def get_cfgs():
         "kp": 20.0,
         "kd": 0.5,
         # termination
-        "termination_if_roll_greater_than": 45,  # degree
-        "termination_if_pitch_greater_than": 45,
+        "termination_if_roll_greater_than": 90,  # degree
+        "termination_if_pitch_greater_than": 90,
         "termination_if_x_greater_than": 3.0,
         "termination_if_y_greater_than": 3.0,
         # base pose
         "base_init_pos": [0.0, 0.0, 0.42],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 20.0,
-        "at_target_threshold": 0.1,
         "resampling_time_s": 4.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
@@ -111,32 +110,24 @@ def get_cfgs():
         "max_visualize_FPS": 60,
     }
     obs_cfg = {
-        "num_obs": 45,
+        "num_obs": 27,
         "obs_scales": {
-            "lin_vel": 2.0,
-            "ang_vel": 0.25,
             "dof_pos": 1.0,
-            "dof_vel": 0.05,
-            "rel_pos": 2.0
+            "ang_vel": 1.0
         },
     }
     reward_cfg = {
-        "tracking_sigma": 0.25,
         "base_height_target": 0.3,
-        "feet_height_target": 0.075,
         "reward_scales": {
-            "target": 10.0,
-            "tracking_lin_vel": 1.0,
+            "rotation": 1.0,
             "action_rate": -0.005,
             "similar_to_default": -0.1,
-            "base_height": -50.0,            
+            "base_height": -50.0,
         },
     }
     command_cfg = {
-        "num_commands": 3,
-        "pos_x_range": [-0.5, 0.5],
-        "pos_y_range": [-0.5, 0.5],
-        "pos_z_range": [0.42, 0.42],
+        "num_commands": 1,
+        "target_yaw_rate": -5.0
     }
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg
@@ -144,7 +135,7 @@ def get_cfgs():
     
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name", type=str, default="go2-wt")
+    parser.add_argument("-e", "--exp_name", type=str, default="go2-turn-left")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
