@@ -127,6 +127,7 @@ class HoverEnv:
         return at_target
 
     def step(self, actions):
+        print(actions)
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.actions.cpu()
         # exec_actions = self.last_actions.cpu() if self.simulate_action_latency else self.actions.cpu()
